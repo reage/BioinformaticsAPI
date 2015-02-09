@@ -1,5 +1,5 @@
 <?php
-class EBIController{
+class UniProtAPI{
 	/* API Address */
 	const UNIPROT_API_BUS = 'http://www.uniprot.org/uniprot/?';
 	const TAXONOMY_API_BUS = '';
