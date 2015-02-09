@@ -1,8 +1,10 @@
 <?php
-class basicProteinInfo{
+class EBIController{
 	/* API Address */
 	const UNIPROT_API_BUS = 'http://www.uniprot.org/uniprot/?';
 	const TAXONOMY_API_BUS = '';
+	private static $xml = null;
+	private static $encoding = 'UTF-8';
 	/* Acceptable fields in uniprot */
 	public static $legalField = array(
 		'accession'			=>	'UniProtKB AC', 
@@ -70,8 +72,18 @@ class basicProteinInfo{
 		if ($compress != 'no') $parameters['compress'] = $columns;
 		if ($limit != 0) $parameters['limit'] = $columns;
 		if ($offset != 0) $parameters['offset'] = $columns;
-		$url = self::UNIPROT_API_BUS.http_build_query( $parameters );
-		return $this->getRemoteResponse($url);
+		$key = md5(serialize($parameters));
+		$cache = F($key);
+		if ($cache) {
+			//有缓存
+			$response = $cache;
+		}else{
+			//无缓存
+			$url = self::UNIPROT_API_BUS.http_build_query( $parameters );
+			$response = $this->getRemoteResponse($url);
+			F($key, $response);
+		}
+		return $response;
 	}
 	/**
 	 * Check whether the field is legal as an uniprot querying keyword
@@ -109,6 +121,7 @@ class basicProteinInfo{
 	 * @todo parse the entire XML
 	*/
 	public function parseXML($string){
+		/*
 		$data = array(
 			'mass'	=>	'',
 			'function'	=>	'',
@@ -125,7 +138,47 @@ class basicProteinInfo{
 			if($f->getAttribute('type') == 'function') 
 				$data['function'] = $f->nodeValue; //Function is a node of comment tag whose type attribution equals to function
 		}
+		*/
+		$xml2Array = new XML2Array();
+		$xmlParsedArray = $xml2Array->createArray($string);
+
+		$simplifiedArray = $xmlParsedArray['uniprot']['entry'];
+		unset($xmlParsedArray);
+
+		$tmp = self::pxGetMassAndSequence($simplifiedArray);
+		$data = array(
+			'function'	=>	self::pxGetFuntion($simplifiedArray),
+			'mass'		=>	$tmp['mass'],
+			'sequence'	=>	$tmp['seq'],
+			'length'	=>	$tmp['length'],
+		);
 		return $data;
+	}
+	/**
+	 * get function information from xml array
+	 */
+	private static function pxGetFuntion(&$xmlArray){
+		$totalComment = $xmlArray['comment'];
+		$ret = '';
+		foreach ($totalComment as $comment) {
+			if($comment['@attributes']['type'] == 'function'){
+				$ret = $comment['text']['@value'];
+				break;
+			}
+		}
+		return $ret;
+	}
+	/**
+	 * get sequence information from xml array
+	 */
+	private static function pxGetMassAndSequence(&$xmlArray){
+		$totalContent = $xmlArray['sequence'];
+		$ret = array(
+			'seq'	=>	$totalContent['@value'],
+			'mass'	=>	$totalContent['@attributes']['mass'],
+			'length'=>	$totalContent['@attributes']['length'],
+		);
+		return $ret;
 	}
 }
 ?>
