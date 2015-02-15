@@ -1,8 +1,16 @@
 <?php
-class UniProtAPI{
+/**
+ * Uniprot API
+ * This class can query Uniprot database through it's API
+ * The response text will transform to an array
+ * @author Reage Yao
+ * @version 0.1
+ */
+class UniprotAPI{
 	/* API Address */
 	const UNIPROT_API_BUS = 'http://www.uniprot.org/uniprot/?';
 	const TAXONOMY_API_BUS = '';
+	const CACHE_PATH = 'cache\';
 	private static $xml = null;
 	private static $encoding = 'UTF-8';
 	/* Acceptable fields in uniprot */
@@ -39,12 +47,20 @@ class UniProtAPI{
 		'sequence'			=>	'UniParc ID',
 		'jobs'				=>	'Jobs (last 7 days)',
 	);
-	/* Query gene&organism */
+	/**
+	 *  Quick query gene&organism
+	 */
 	public function quickQuery($gene, $organism){
 		$query = array(
 			'gene' => $gene,
 			'organism'	=>	$organism,
 		);
+		$this->ajaxReturn($this->parseXML($this->uniproQuery($query)));
+	}
+	/**
+	 * DIY query array
+	 */
+	public function query($query) {
 		$this->ajaxReturn($this->parseXML($this->uniproQuery($query)));
 	}
 	/**
@@ -73,15 +89,15 @@ class UniProtAPI{
 		if ($limit != 0) $parameters['limit'] = $columns;
 		if ($offset != 0) $parameters['offset'] = $columns;
 		$key = md5(serialize($parameters));
-		$cache = F($key);
+		$cache = file_get_contents(CACHE_PATH.$key);
 		if ($cache) {
-			//有缓存
+			//cached
 			$response = $cache;
 		}else{
-			//无缓存
+			//not cached
 			$url = self::UNIPROT_API_BUS.http_build_query( $parameters );
 			$response = $this->getRemoteResponse($url);
-			F($key, $response);
+			file_put_contents(CACHE_PATH.$key, $response);
 		}
 		return $response;
 	}
@@ -121,36 +137,24 @@ class UniProtAPI{
 	 * @todo parse the entire XML
 	*/
 	public function parseXML($string){
-		/*
-		$data = array(
-			'mass'	=>	'',
-			'function'	=>	'',
-		);
-		$dom = new \DOMDocument('1.0');
-		$dom->loadXML($string);
-		$protein = $dom->getElementsByTagName('sequence');
-		$sqStudy = $dom->getElementsByTagName('sequence');//Mass is an attribution of sequence tag
-		foreach ($sqStudy as $s) {
-			$data['mass'] = $s->getAttribute('mass');
-		}
-		$func = $dom->getElementsByTagName('comment');
-		foreach ($func as $f) {
-			if($f->getAttribute('type') == 'function') 
-				$data['function'] = $f->nodeValue; //Function is a node of comment tag whose type attribution equals to function
-		}
-		*/
-		$xml2Array = new XML2Array();
+		$xml2Array = A('XML2Array');
 		$xmlParsedArray = $xml2Array->createArray($string);
 
 		$simplifiedArray = $xmlParsedArray['uniprot']['entry'];
 		unset($xmlParsedArray);
-
+		
+		/*If there were more than one entry that had been returned*/
+		if (count($simplifiedArray) > 1 && !isset($simplifiedArray['accession'])) {
+			$simplifiedArray = $simplifiedArray[0];
+		}
+		
 		$tmp = self::pxGetMassAndSequence($simplifiedArray);
 		$data = array(
-			'function'	=>	self::pxGetFuntion($simplifiedArray),
-			'mass'		=>	$tmp['mass'],
-			'sequence'	=>	$tmp['seq'],
-			'length'	=>	$tmp['length'],
+			'function'		=>	self::pxGetFuntion($simplifiedArray),
+			'mass'			=>	$tmp['mass'],
+			'sequence'		=>	$tmp['seq'],
+			'length'		=>	$tmp['length'],
+			'activeSite'	=>	self::pxGetActiveSite($simplifiedArray),
 		);
 		return $data;
 	}
@@ -162,7 +166,11 @@ class UniProtAPI{
 		$ret = '';
 		foreach ($totalComment as $comment) {
 			if($comment['@attributes']['type'] == 'function'){
-				$ret = $comment['text']['@value'];
+				if(isset($comment['text']['@value'])){
+					$ret = $comment['text']['@value'];
+				}else{
+					$ret = $comment['text'];
+				}
 				break;
 			}
 		}
@@ -174,10 +182,28 @@ class UniProtAPI{
 	private static function pxGetMassAndSequence(&$xmlArray){
 		$totalContent = $xmlArray['sequence'];
 		$ret = array(
-			'seq'	=>	$totalContent['@value'],
+			'seq'	=>	str_replace("\n", '', $totalContent['@value']),
 			'mass'	=>	$totalContent['@attributes']['mass'],
 			'length'=>	$totalContent['@attributes']['length'],
 		);
+		return $ret;
+	}
+	/**
+	 * get active site from xml array
+	 * @param unknown $xmlArray
+	 * @return Ambigous <string, multitype:NULL >
+	 */
+	private static function pxGetActiveSite(&$xmlArray) {
+		$totalFeature = $xmlArray['feature'];
+		$ret = '';
+		foreach ($totalFeature as $feature) {
+			if ($feature['@attributes']['type'] == 'active site') {
+				$ret[] = array(
+						'position'		=>	$feature['location']['position']['@attributes']['position'],
+						'description'	=>	$feature['@attributes']['description'],
+				);
+			};
+		}
 		return $ret;
 	}
 }
